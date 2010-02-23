@@ -2,6 +2,30 @@ var sys = require("sys"),
     http = require("http"),
     url = require("url");
 
+var HttpPool = function (options) {
+  this.options = options;
+  this.clients = {};
+}
+HttpPool.prototype.getClient = function (port, hostname) {
+  if (!this.clients[hostname+':'+port]) {
+    var clients = [];
+    this.clients[hostname+':'+port] = clients;
+  } else {
+    var clients = this.clients[hostname+':'+port];
+  }
+  for (i=0;i<clients.length;i+=1) {
+    // TODO: Make this work
+    if (clients[i].busy === false) {
+      return clients[i];
+    }
+  }
+  var c = http.createClient(port, hostname);
+  c.busy = true;
+  clients.push(c);
+  return c;
+}
+pool = new HttpPool();
+
 binaryContentTypes = ['application/octet-stream', 'application/ogg', 'application/zip', 'application/pdf',
                       'image/gif', 'image/jpeg', 'image/png', 'image/tiff', 'image/vnd.microsoft.icon',
                       'multipart/encrypted', 'application/vnd.ms-excel', 'application/vnd.ms-powerpoint',
@@ -24,16 +48,11 @@ var guessEncoding = function (contentEncoding, contentType) {
 
 var requestHandler = function (clientRequest, clientResponse) {
   var uri = url.parse(clientRequest.url);
-  // var c = pool.getClient(uri.port, uri.hostname);
   if (uri.port == undefined) {
     uri.port = {"http:":80,"https:":443}[uri.protocol]
   }
-  var c = http.createClient(uri.port, uri.hostname)
+  var c = pool.getClient(uri.port, uri.hostname);
   var proxyRequest = c.request(clientRequest.method, uri.pathname, clientRequest.headers);
-  
-  var messageBuffer = ''
-  
-  
   proxyRequest.addListener("response", function (response) {
     clientResponse.writeHeader(response.statusCode, response.headers);
     var encoding = guessEncoding(response.headers['content-encoding'], response.headers['content-type']);
@@ -43,6 +62,7 @@ var requestHandler = function (clientRequest, clientResponse) {
     })
     response.addListener("end", function () {
       clientResponse.close();
+      c.busy = false;
     })
   })
   
